@@ -2,7 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 
 import { errorMessage, http } from "../../../lib/http";
 
-type Balance = { employee_id: string; leave_type: string; balance: string; last_updated: string };
+type Balance = { employee_id: string; leave_type: string; balance: string;
+  available_balance: string; last_updated: string };
 type Page<T> = { results: T[] };
 
 export default function BalancesPage() {
@@ -18,7 +19,7 @@ export default function BalancesPage() {
     {balances.data && (balances.data.length ? <table>
       <thead><tr><th>Leave type</th><th>Available</th><th>Updated</th></tr></thead>
       <tbody>{balances.data.map((row) => <tr key={row.leave_type}>
-        <td>{row.leave_type}</td><td>{row.balance}</td>
+        <td>{row.leave_type}</td><td>{row.available_balance}</td>
         <td>{new Date(row.last_updated).toLocaleDateString()}</td>
       </tr>)}</tbody>
     </table> : <p>No leave balances are available yet.</p>)}
