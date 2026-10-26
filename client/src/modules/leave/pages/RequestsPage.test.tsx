@@ -43,4 +43,20 @@ describe("leave request form", () => {
       substitute_id: "",
     }));
   });
+
+  it("offers structured export and application printing from request history", async () => {
+    vi.spyOn(http, "get").mockResolvedValue({ data: { results: [{
+      id: 7, leave_type: "CL", start_date: "2026-11-02", end_date: "2026-11-02",
+      reason: "personal", half_day: "none", station_leave: false, station_leave_details: "",
+      status: "approved", workflow_state: "approved", substitute_id: "",
+      substitute_replacement_used: false,
+    }] } });
+    const print = vi.spyOn(window, "print").mockImplementation(() => undefined);
+    renderPage();
+    expect(await screen.findByRole("link", { name: "Export JSON" })).toHaveAttribute(
+      "href", "/api/v1/leave/requests/7/export/",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Print application" }));
+    expect(print).toHaveBeenCalledOnce();
+  });
 });

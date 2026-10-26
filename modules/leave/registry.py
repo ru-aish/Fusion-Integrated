@@ -35,6 +35,14 @@ NAV_ITEMS = [
         "required_permission": "leave_cell.tasks.view",
         "sort_order": 15,
     },
+    {
+        "code": "leave_cell.configuration",
+        "label": "Leave Configuration",
+        "icon": "Gear",
+        "to": "/leave/configuration",
+        "required_permission": "leave_cell.configuration.manage",
+        "sort_order": 25,
+    },
 ]
 
 PERMISSIONS = [
@@ -44,6 +52,9 @@ PERMISSIONS = [
     ("leave_cell.tasks.view", "View assigned leave tasks"),
     ("leave_cell.tasks.act", "Act on assigned leave tasks"),
     ("leave_cell.configuration.manage", "Manage authoritative leave configuration"),
+    ("leave_cell.offline.sync", "Synchronize authorized offline leave records"),
+    ("leave_cell.accounts.manage", "Issue and reconcile annual leave accounts"),
+    ("leave_cell.sla.manage", "Configure leave workflow SLAs"),
 ]
 
 ROLE_GRANTS = {
@@ -59,6 +70,9 @@ ROLE_GRANTS = {
         "leave_cell.tasks.view",
         "leave_cell.tasks.act",
         "leave_cell.configuration.manage",
+        "leave_cell.offline.sync",
+        "leave_cell.accounts.manage",
+        "leave_cell.sla.manage",
     ],
     "unit_head": ["leave_cell.tasks.view", "leave_cell.tasks.act"],
     "sanctioning_authority": ["leave_cell.tasks.view", "leave_cell.tasks.act"],

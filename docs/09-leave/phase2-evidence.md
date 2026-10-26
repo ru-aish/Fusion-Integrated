@@ -111,13 +111,60 @@ downloaded. Consequently, no Phase 2 interaction with the selected local model i
 claimed. This implementation and review used the assigned GPT-6 Luna agent and normal
 engineering tools; it is not a substitute claim for a local GPT-OSS run.
 
-## Open issues / deployment blockers
+## Remaining implementation pass evidence
 
-The following synchronized requirements are still incomplete: annual entitlement
-issuance and year-end carry-forward/lapse/VL-to-EL conversion, idempotent year-end
-processing, offline-sanctioned record synchronization, SLA reminders/escalation,
-printable/exportable applications, and full admin UX for configuration/import. Calendar
-replacement is available through the authorized API, but there is no administrator
-editor/import screen. `LeaveBalance` remains a provisioned snapshot: ledger events are
-auditable, but year-scoped accounts and reconciliation are not implemented. Production
-deployment and authenticated live UI/API smoke are not established.
+The bounded follow-up pass adds the following features and regression evidence:
+
+| Trace | Implementation and verification |
+|---|---|
+| CFR-EL-004–009, CFR-EL-028; BR-EL-002–009 | Added year-scoped employee/category accounts, audited opening snapshot migration, transaction reconciliation, explicit annual issuance, unique year runs, audited admin adjustments, per-year cross-boundary reservations/debits, CL/RH/SCL lapse, EL/COL carry-forward, and fractional faculty VL-to-EL conversion. PostgreSQL tests cover multiple-request annual caps, cross-year account slices and ledger reconciliation, issuance/year-close replay, lapse/carry-forward, and retry after an exception. |
+| CFR-EL-027 | Added permission-gated offline sanction synchronization with provenance validation, configured employee/hierarchy checks, no workflow relaunch, balance debit/audit, external-ID serialization, idempotent replay, changed-content conflict, denial, and rollback tests. |
+| CFR-EL-029, CFR-EL-031–032 | Added per-role SLA thresholds, deterministic processor/task, one-time reminders/escalations through Fusion’s notification outbox, and routing changes only to configured higher authorities. Tests cover threshold processing, routing and repeated runs. |
+| CFR-EL-022–023 | Added owner/assigned-official request history, application print and JSON export, and substitute field scoping across list/detail/history/action/export. PostgreSQL tests assert assigned substitutes cannot read evidence identifiers, reasons, or station details. |
+| CFR-EL-024–026 | Added permission-gated configuration UI for HR/hierarchy profiles, policy, atomic calendar replacement, offline sanction import, accounts/adjustments/year-end issuance, and SLA configuration/processing. Frontend interaction test submits a profile; T3 preview loaded the page and all six backing APIs returned 200 under isolated synthetic authentication. |
+| Cross-cutting contract/upgrade | Generated `openapi/fusion-integrated.v1.yaml` describes the new endpoints and request fields; generated permission catalogue includes the new grants/navigation. Verified a clean migration, populated Phase 1 (`leave.0001`) upgrade, and populated pre-account (`leave.0008`) upgrade. Legacy balance/request/debit rows remained present; the test debit reconciled an 8.00 snapshot to a 5.00 opening account without replaying the debit. |
+
+All annual amounts use the approved baseline values in the synchronized problem
+statement: CL 8, RH 2, SCL up to 15, non-faculty EL 30, faculty VL 60, and COL 20.
+Unused CL/RH/SCL lapse; unused VL converts 2:1 including fractional conversion;
+EL/COL carry forward. Existing legacy `LeaveBalance`/ledger/request rows are retained.
+The account migration establishes its opening balance from the legacy snapshot after
+subtracting current-year debit/adjustment lifecycle events; those old rows are not
+replayed into the new account ledger.
+
+Final focused verification for this pass:
+
+- PostgreSQL 16.15 backend/IAM regression suite: **55 passed** with
+  `/work/bin/workspace-run check -- bash /work/artifacts/fusion-elm-6b/with-db-env.sh .venv/bin/pytest -q --no-header modules/leave/tests fusion_auth/tests --maxfail=1`.
+- Frontend: **38 tests passed**, TypeScript check passed, production build passed;
+  run through `workspace-run check`. Vite reported the existing >500 kB main-chunk
+  advisory.
+- Ruff passed for changed Python source; Django system checks and
+  `makemigrations --check --dry-run` passed; `spectacular --fail-on-warn` generated
+  a byte-for-byte matching committed OpenAPI schema; permission manifest check,
+  nav/route, module-FK, and plural-contract checks passed.
+- Three disposable PostgreSQL databases passed clean migration to head, populated
+  Phase 1 schema/data upgrade from `leave.0001`, and populated `leave.0008` lifecycle
+  snapshot reconciliation. All temporary databases were dropped afterward; the
+  task-owned test database/container remains available.
+- T3 preview authenticated through the temporary local synthetic IAM and rendered
+  `/leave/configuration`; `/api/v1/me` and the six configuration backing APIs returned
+  200. The task-owned dev unit was stopped after the smoke.
+
+## External prerequisites and limits
+
+- The specification says year-end runs at the configured boundary but does not supply
+  an institution-specific boundary date. The scheduled task currently uses the
+  calendar-year boundary (January 1), consistent with calendar-year annual entitlements;
+  its daily idempotent check catches up if that date was missed. HR must confirm the
+  institution boundary before production scheduling.
+- Profiles and calendars are maintained through authorized ELM configuration screens;
+  an upstream HR or Academic Calendar feed is not connected in this pass. Production
+  use requires approved profile/hierarchy data and published calendars.
+- Configured Fusion IAM was unreachable. Browser/API smoke used an ephemeral synthetic
+  IAM implementing the repository's documented endpoint contract on a private local
+  port. It exercised Fusion’s real session middleware, cookie, CSRF, API, route and UI;
+  it is not institute SSO. Live SSO still requires the external IAM service.
+- The selected local `gpt-oss-20b` runtime remained unavailable. No model weights were
+  downloaded and no interaction with that model is claimed; this work used the assigned
+  GPT-6 Luna agent.
