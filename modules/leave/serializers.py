@@ -3,7 +3,15 @@ from decimal import Decimal
 from django.db.models import Q
 from rest_framework import serializers
 
-from .models import LeaveBalance, LeaveCalendarDay, LeaveEmployeeProfile, LeavePolicy, LeaveRequest
+from .models import (
+    LeaveBalance,
+    LeaveCalendarDay,
+    LeaveEmployeeProfile,
+    LeavePolicy,
+    LeaveRequest,
+    LeaveSLAConfig,
+    LeaveType,
+)
 
 ACTIVE_STATES = {
     "awaiting_substitute",
@@ -44,6 +52,39 @@ class LeaveBalanceSerializer(serializers.ModelSerializer):
 
 
 class LeaveRequestSerializer(serializers.ModelSerializer):
+    def get_fields(self):
+        fields = super().get_fields()
+        request = self.context.get("request")
+        if request and getattr(request, "principal", None):
+            from .models import LeaveTask
+
+            assigned_as_substitute = LeaveTask.objects.filter(
+                request_id=getattr(self.instance, "pk", None),
+                actor_id=str(request.principal.user_id),
+                role="substitute",
+            ).exists()
+            if assigned_as_substitute:
+                fields.pop("medical_evidence_reference", None)
+                fields.pop("reason", None)
+                fields.pop("station_leave_details", None)
+        return fields
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        if request and getattr(request, "principal", None):
+            from .models import LeaveTask
+
+            assigned_as_substitute = LeaveTask.objects.filter(
+                request=instance,
+                actor_id=str(request.principal.user_id),
+                role="substitute",
+            ).exists()
+            if assigned_as_substitute:
+                for field in ("medical_evidence_reference", "reason", "station_leave_details"):
+                    data.pop(field, None)
+        return data
+
     class Meta:
         model = LeaveRequest
         fields = [
@@ -142,3 +183,166 @@ class LeaveInboxItemSerializer(serializers.Serializer):
     leave_type = serializers.CharField()
     start_date = serializers.DateField()
     end_date = serializers.DateField()
+
+
+class LeaveOfflineSyncSerializer(serializers.Serializer):
+    external_id = serializers.CharField(max_length=120)
+    employee_id = serializers.CharField(max_length=64)
+    leave_type = serializers.ChoiceField(choices=LeaveType.choices)
+    start_date = serializers.DateField()
+    end_date = serializers.DateField()
+    reason = serializers.CharField()
+    sanction_reference = serializers.CharField(max_length=255)
+    authority_id = serializers.CharField(max_length=64)
+    source_reason = serializers.CharField(max_length=255)
+
+
+class LeaveYearCommandSerializer(serializers.Serializer):
+    year = serializers.IntegerField(min_value=2000, max_value=2200)
+
+
+class LeaveYearAdjustmentSerializer(LeaveYearCommandSerializer):
+    employee_id = serializers.CharField(max_length=64)
+    leave_type = serializers.ChoiceField(choices=LeaveType.choices)
+    amount = serializers.DecimalField(max_digits=7, decimal_places=2)
+    reason = serializers.CharField(max_length=500)
+
+
+class LeaveAccountTransactionSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=7, decimal_places=2)
+    kind = serializers.CharField()
+    reference = serializers.CharField()
+    actor_id = serializers.CharField()
+    created_at = serializers.DateTimeField()
+
+
+class LeaveAccountSerializer(serializers.Serializer):
+    employee_id = serializers.CharField()
+    leave_type = serializers.CharField()
+    year = serializers.IntegerField()
+    opening_balance = serializers.DecimalField(max_digits=7, decimal_places=2)
+    available_balance = serializers.DecimalField(max_digits=7, decimal_places=2)
+    source = serializers.CharField()
+    ledger_balance = serializers.DecimalField(max_digits=7, decimal_places=2)
+    reconciled = serializers.BooleanField()
+    transactions = LeaveAccountTransactionSerializer(many=True)
+
+
+class LeaveActionSerializer(serializers.Serializer):
+    action = serializers.ChoiceField(
+        choices=[
+            "accept",
+            "decline",
+            "replace_substitute",
+            "approve",
+            "reject",
+            "recommend",
+            "not_recommend",
+            "route",
+            "withdraw",
+            "review_resumption",
+        ]
+    )
+    note = serializers.CharField(required=False, allow_blank=True)
+    substitute_id = serializers.CharField(required=False, allow_blank=True, max_length=64)
+
+
+class LeaveResumeSerializer(serializers.Serializer):
+    actual_return_date = serializers.DateField()
+
+
+class LeaveTransitionSerializer(serializers.Serializer):
+    actor_id = serializers.CharField()
+    action = serializers.CharField()
+    from_state = serializers.CharField()
+    to_state = serializers.CharField()
+    note = serializers.CharField(allow_blank=True)
+    created_at = serializers.DateTimeField()
+
+
+class LeaveExportSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    employee_id = serializers.CharField()
+    leave_type = serializers.CharField()
+    start_date = serializers.DateField()
+    end_date = serializers.DateField()
+    reason = serializers.CharField(required=False)
+    status = serializers.CharField()
+    workflow_state = serializers.CharField()
+    decision_history = LeaveTransitionSerializer(many=True)
+
+
+class LeaveOfflineRowSerializer(serializers.Serializer):
+    external_id = serializers.CharField()
+    employee_id = serializers.CharField()
+    leave_type = serializers.CharField()
+    start_date = serializers.DateField()
+    end_date = serializers.DateField()
+    sanction_reference = serializers.CharField()
+    authority_id = serializers.CharField()
+    source_reason = serializers.CharField()
+    created_at = serializers.DateTimeField()
+
+
+class LeaveOfflineResultSerializer(serializers.Serializer):
+    request_id = serializers.IntegerField()
+    workflow_state = serializers.CharField()
+    created = serializers.BooleanField()
+
+
+class LeaveYearRunSerializer(serializers.Serializer):
+    year = serializers.IntegerField()
+    exceptions = serializers.ListField(child=serializers.JSONField())
+
+
+class LeaveAdminYearAccountSerializer(serializers.Serializer):
+    employee_id = serializers.CharField()
+    leave_type = serializers.CharField()
+    year = serializers.IntegerField()
+    opening_balance = serializers.DecimalField(max_digits=7, decimal_places=2)
+    available_balance = serializers.DecimalField(max_digits=7, decimal_places=2)
+    source = serializers.CharField()
+
+
+class LeaveYearEndListSerializer(serializers.Serializer):
+    runs = LeaveYearRunSerializer(many=True)
+    accounts = LeaveAdminYearAccountSerializer(many=True)
+
+
+class LeaveAdjustmentResultSerializer(serializers.Serializer):
+    employee_id = serializers.CharField()
+    leave_type = serializers.CharField()
+    year = serializers.IntegerField()
+    available_balance = serializers.DecimalField(max_digits=7, decimal_places=2)
+
+
+class LeaveSLAProcessSerializer(serializers.Serializer):
+    processed = serializers.IntegerField()
+
+
+class LeaveIssuanceResultSerializer(serializers.Serializer):
+    year = serializers.IntegerField()
+    issued = serializers.BooleanField()
+
+
+class LeaveSLAConfigSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LeaveSLAConfig
+        fields = "__all__"
+
+    def validate(self, attrs):
+        reminder = attrs.get("reminder_hours", getattr(self.instance, "reminder_hours", 0))
+        escalation = attrs.get("escalation_hours", getattr(self.instance, "escalation_hours", 0))
+        if reminder < 1 or escalation <= reminder:
+            raise serializers.ValidationError(
+                "Escalation must occur after a positive reminder threshold."
+            )
+        if attrs.get(
+            "change_routing", getattr(self.instance, "change_routing", False)
+        ) and not attrs.get(
+            "escalation_actor_id", getattr(self.instance, "escalation_actor_id", "")
+        ):
+            raise serializers.ValidationError(
+                {"escalation_actor_id": "Required when escalation changes task routing."}
+            )
+        return attrs

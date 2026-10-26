@@ -29,6 +29,8 @@ def _authoritative_inputs():
             "eligible_substitute_ids": ["4001"],
         },
     )
+    LeaveEmployeeProfile.objects.update_or_create(employee_id="4001", defaults={})
+    LeaveEmployeeProfile.objects.update_or_create(employee_id="4002", defaults={})
 
 
 def _client(stub_iam, *, permissions=("leave_cell.requests.create",), user_id=1001):
@@ -167,17 +169,17 @@ def test_unassigned_actor_cannot_decide(stub_iam):
 
 def test_pending_withdrawal_closes_task_and_blocks_later_decision(stub_iam):
     _balance()
-    created = _client(stub_iam).post('/api/v1/leave/requests/', _payload(), format='json')
-    request_id = created.json()['id']
-    withdrawn = _client(stub_iam).post(f'/api/v1/leave/requests/{request_id}/act/',
-        {'action': 'withdraw'}, format='json')
+    created = _client(stub_iam).post("/api/v1/leave/requests/", _payload(), format="json")
+    request_id = created.json()["id"]
+    withdrawn = _client(stub_iam).post(
+        f"/api/v1/leave/requests/{request_id}/act/", {"action": "withdraw"}, format="json"
+    )
     assert withdrawn.status_code == 200
-    assert withdrawn.json()['workflow_state'] == 'withdrawn'
-    assert not LeaveTask.objects.filter(request_id=request_id, state='open').exists()
-    late = _client(stub_iam, user_id=2001,
-        permissions=('leave_cell.tasks.act',)).post(
-            f'/api/v1/leave/requests/{request_id}/act/',
-            {'action': 'approve'}, format='json')
+    assert withdrawn.json()["workflow_state"] == "withdrawn"
+    assert not LeaveTask.objects.filter(request_id=request_id, state="open").exists()
+    late = _client(stub_iam, user_id=2001, permissions=("leave_cell.tasks.act",)).post(
+        f"/api/v1/leave/requests/{request_id}/act/", {"action": "approve"}, format="json"
+    )
     assert late.status_code == 403
 
 
@@ -232,22 +234,33 @@ def test_substitute_recovery_allows_only_one_replacement(stub_iam):
     )
     request_id = created.json()["id"]
     sub_one = _client(stub_iam, user_id=4001, permissions=("leave_cell.tasks.act",))
-    assert sub_one.post(
-        f"/api/v1/leave/requests/{request_id}/act/", {"action": "decline"}, format="json"
-    ).status_code == 200
+    assert (
+        sub_one.post(
+            f"/api/v1/leave/requests/{request_id}/act/", {"action": "decline"}, format="json"
+        ).status_code
+        == 200
+    )
     applicant = _client(stub_iam)
-    assert applicant.post(
-        f"/api/v1/leave/requests/{request_id}/act/",
-        {"action": "replace_substitute", "substitute_id": "4002"}, format="json",
-    ).status_code == 200
+    assert (
+        applicant.post(
+            f"/api/v1/leave/requests/{request_id}/act/",
+            {"action": "replace_substitute", "substitute_id": "4002"},
+            format="json",
+        ).status_code
+        == 200
+    )
     sub_two = _client(stub_iam, user_id=4002, permissions=("leave_cell.tasks.act",))
-    assert sub_two.post(
-        f"/api/v1/leave/requests/{request_id}/act/", {"action": "decline"}, format="json"
-    ).status_code == 200
+    assert (
+        sub_two.post(
+            f"/api/v1/leave/requests/{request_id}/act/", {"action": "decline"}, format="json"
+        ).status_code
+        == 200
+    )
     applicant = _client(stub_iam)
     retry = applicant.post(
         f"/api/v1/leave/requests/{request_id}/act/",
-        {"action": "replace_substitute", "substitute_id": "4001"}, format="json",
+        {"action": "replace_substitute", "substitute_id": "4001"},
+        format="json",
     )
     assert retry.status_code == 400
 
@@ -310,7 +323,12 @@ def test_cancellation_after_start_is_rejected(stub_iam):
 def test_pending_cancellation_does_not_consume_a_second_balance_commitment(stub_iam):
     original_id = _approved_cl(stub_iam)
     applicant = _client(stub_iam)
-    assert applicant.post(f"/api/v1/leave/requests/{original_id}/cancel/", {}, format="json").status_code == 201
+    assert (
+        applicant.post(
+            f"/api/v1/leave/requests/{original_id}/cancel/", {}, format="json"
+        ).status_code
+        == 201
+    )
     replacement = applicant.post(
         "/api/v1/leave/requests/",
         _payload(start_date="2026-11-03", end_date="2026-11-11"),
@@ -404,9 +422,12 @@ def test_approved_extension_is_not_double_counted_after_parent_end_is_updated(st
     head = _client(stub_iam, user_id=2001, permissions=("leave_cell.tasks.act",))
     head.post(f"/api/v1/leave/requests/{extension_id}/act/", {"action": "recommend"}, format="json")
     authority = _client(stub_iam, user_id=3001, permissions=("leave_cell.tasks.act",))
-    assert authority.post(
-        f"/api/v1/leave/requests/{extension_id}/act/", {"action": "approve"}, format="json"
-    ).status_code == 200
+    assert (
+        authority.post(
+            f"/api/v1/leave/requests/{extension_id}/act/", {"action": "approve"}, format="json"
+        ).status_code
+        == 200
+    )
 
     next_request = _client(stub_iam).post(
         "/api/v1/leave/requests/",

@@ -19,6 +19,15 @@ type LeaveRequest = {
   substitute_replacement_used: boolean;
 };
 type Page<T> = { results: T[] };
+type Transition = { actor_id:string; action:string; from_state:string; to_state:string; note:string; created_at:string };
+
+function HistoryDetails({id}:{id:number}) {
+  const history=useQuery({queryKey:["leave-cell","history",id],queryFn:async()=>(await http.get<Transition[]>(`/leave/requests/${id}/history/`)).data,enabled:false});
+  return <details onToggle={e=>{if((e.currentTarget as HTMLDetailsElement).open) void history.refetch();}}><summary>Decision history</summary>
+    {history.isError&&<p role="alert">{errorMessage(history.error)}</p>}{history.isPending&&!history.data&&<p>Loading history…</p>}
+    {history.data?.map((event,index)=><p key={`${event.created_at}-${index}`}>{new Date(event.created_at).toLocaleString()}: {event.action} ({event.from_state} → {event.to_state}){event.note&&` — ${event.note}`}</p>)}
+  </details>;
+}
 
 export default function RequestsPage() {
   const client = useQueryClient();
@@ -147,7 +156,9 @@ export default function RequestsPage() {
             <button onClick={() => act.mutate({ id: row.id, action: "replace_substitute",
               substitute_id: replacement[row.id] })}>Nominate replacement</button>
           </>}
-          <a href={`/api/v1/leave/requests/${row.id}/history/`} target="_blank" rel="noreferrer">History</a>
+          <HistoryDetails id={row.id}/>
+          {" "}<a href={`/api/v1/leave/requests/${row.id}/export/`} target="_blank" rel="noreferrer">Export JSON</a>
+          {" "}<button type="button" onClick={() => window.print()}>Print application</button>
         </td>
       </tr>)}</tbody>
     </table>}

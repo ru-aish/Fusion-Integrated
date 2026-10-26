@@ -1,6 +1,7 @@
 from datetime import timedelta
 
 from django.db import models
+from django.utils import timezone
 
 
 class LeaveType(models.TextChoices):
@@ -173,7 +174,8 @@ class LeaveLedgerEntry(models.Model):
     employee_id = models.CharField(max_length=64)
     leave_type = models.CharField(max_length=4, choices=LeaveType.choices)
     request = models.ForeignKey(LeaveRequest, null=True, blank=True, on_delete=models.PROTECT)
-    amount = models.DecimalField(max_digits=6, decimal_places=1)
+    amount = models.DecimalField(max_digits=7, decimal_places=2)
+    year = models.PositiveSmallIntegerField(null=True, blank=True)
     kind = models.CharField(
         max_length=24,
         choices=[
@@ -191,3 +193,88 @@ class LeaveLedgerEntry(models.Model):
 
     def __str__(self):
         return f"{self.employee_id}: {self.kind} {self.amount} {self.leave_type}"
+
+
+class LeaveYearAccount(models.Model):
+    employee_id = models.CharField(max_length=64)
+    leave_type = models.CharField(max_length=4, choices=LeaveType.choices)
+    year = models.PositiveSmallIntegerField()
+    opening_balance = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+    available_balance = models.DecimalField(max_digits=7, decimal_places=2, default=0)
+    source = models.CharField(max_length=24, default="annual")
+    created_at = models.DateTimeField(default=timezone.now, editable=False)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["employee_id", "leave_type", "year"], name="leave_year_account_uniq"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.employee_id}: {self.leave_type} {self.year}"
+
+
+class LeaveYearRun(models.Model):
+    year = models.PositiveSmallIntegerField(unique=True)
+    completed_at = models.DateTimeField(auto_now_add=True)
+    actor_id = models.CharField(max_length=64, default="system")
+    exceptions = models.JSONField(default=list)
+
+    def __str__(self):
+        return f"Leave year close {self.year}"
+
+
+class LeaveIssuanceRun(models.Model):
+    year = models.PositiveSmallIntegerField(unique=True)
+    issued_at = models.DateTimeField(auto_now_add=True)
+    actor_id = models.CharField(max_length=64)
+
+    def __str__(self):
+        return f"Leave entitlement issue {self.year}"
+
+
+class LeaveOfflineRecord(models.Model):
+    external_id = models.CharField(max_length=120, unique=True)
+    employee_id = models.CharField(max_length=64)
+    leave_type = models.CharField(max_length=4, choices=LeaveType.choices)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    reason = models.TextField()
+    sanction_reference = models.CharField(max_length=255)
+    authority_id = models.CharField(max_length=64)
+    source_reason = models.CharField(max_length=255)
+    payload_hash = models.CharField(max_length=64)
+    request = models.OneToOneField(
+        LeaveRequest, on_delete=models.PROTECT, related_name="offline_record"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Offline leave {self.external_id} for {self.employee_id}"
+
+
+class LeaveSLAConfig(models.Model):
+    role = models.CharField(max_length=24, unique=True)
+    reminder_hours = models.PositiveIntegerField()
+    escalation_hours = models.PositiveIntegerField()
+    escalation_actor_id = models.CharField(max_length=64, blank=True)
+    change_routing = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"Leave SLA: {self.role}"
+
+
+class LeaveSLAEvent(models.Model):
+    task = models.ForeignKey(LeaveTask, on_delete=models.CASCADE)
+    kind = models.CharField(max_length=16)
+    delivered_at = models.DateTimeField(auto_now_add=True)
+    recipient_id = models.CharField(max_length=64)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["task", "kind"], name="leave_sla_task_kind_uniq")
+        ]
+
+    def __str__(self):
+        return f"Leave task {self.task_id}: {self.kind}"
