@@ -2797,6 +2797,13 @@ components:
           format: date
         reason:
           type: string
+        half_day:
+          $ref: '#/components/schemas/HalfDayEnum'
+        station_leave:
+          type: boolean
+        station_leave_details:
+          type: string
+          maxLength: 500
         status:
           type: string
           readOnly: true
@@ -2817,6 +2824,16 @@ components:
       - start_date
       - status
       - updated_at
+    HalfDayEnum:
+      enum:
+      - none
+      - first
+      - second
+      type: string
+      description: |-
+        * `none` - Full day(s)
+        * `first` - First half
+        * `second` - Second half
     LeaveTypeEnum:
       enum:
       - CL
