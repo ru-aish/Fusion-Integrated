@@ -114,6 +114,8 @@ class LeavePolicy(models.Model):
     vl_annual = models.DecimalField(max_digits=5, decimal_places=1, default=60)
     col_annual = models.DecimalField(max_digits=5, decimal_places=1, default=20)
     col_medical_evidence_required = models.BooleanField(default=False)
+    year_end_month = models.PositiveSmallIntegerField(null=True, blank=True)
+    year_end_day = models.PositiveSmallIntegerField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):

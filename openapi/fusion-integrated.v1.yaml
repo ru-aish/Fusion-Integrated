@@ -3782,6 +3782,16 @@ components:
           pattern: ^-?\d{0,4}(?:\.\d{0,1})?$
         col_medical_evidence_required:
           type: boolean
+        year_end_month:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          nullable: true
+        year_end_day:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          nullable: true
         updated_at:
           type: string
           format: date-time

@@ -174,6 +174,26 @@ class LeavePolicySerializer(serializers.ModelSerializer):
         fields = "__all__"
         read_only_fields = ["key", "updated_at"]
 
+    def validate(self, attrs):
+        month = attrs.get("year_end_month", getattr(self.instance, "year_end_month", None))
+        day = attrs.get("year_end_day", getattr(self.instance, "year_end_day", None))
+        if (month is None) != (day is None):
+            raise serializers.ValidationError("Configure both year-end month and day together.")
+        if month is not None:
+            from datetime import date
+
+            try:
+                date(2001, month, day)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError(
+                    {
+                        "year_end_day": (
+                            "Provide a valid annual boundary date; February 29 is not supported."
+                        )
+                    }
+                ) from None
+        return attrs
+
 
 class LeaveInboxItemSerializer(serializers.Serializer):
     task_id = serializers.IntegerField()

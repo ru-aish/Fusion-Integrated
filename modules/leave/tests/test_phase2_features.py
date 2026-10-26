@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, timedelta
 from decimal import Decimal
 
 import pytest
@@ -477,6 +477,26 @@ def test_admin_opening_credit_and_adjustment_require_audited_authorization(stub_
     )
 
 
+def test_admin_cannot_adjust_a_closed_calendar_account(stub_iam):
+    LeaveEmployeeProfile.objects.create(employee_id="closed-adjustment")
+    LeaveYearAccount.objects.create(
+        employee_id="closed-adjustment", leave_type="CL", year=2026,
+        opening_balance=8, available_balance=8,
+    )
+    run_year_end(2026, "admin")
+    admin = client(stub_iam, 9000, ("leave_cell.accounts.manage",))
+    response = admin.post(
+        "/api/v1/leave/year-end/accounts/adjust/",
+        {
+            "employee_id": "closed-adjustment", "leave_type": "CL", "year": 2026,
+            "amount": "1.00", "reason": "must be rejected after close",
+        },
+        format="json",
+    )
+    assert response.status_code == 400
+    assert "closed calendar years" in str(response.json()).lower()
+
+
 def test_year_end_exceptions_can_be_replayed_after_pending_commitment_resolves():
     LeavePolicy.objects.get_or_create(key="current")
     LeaveEmployeeProfile.objects.create(employee_id="pending-close")
@@ -507,7 +527,7 @@ def test_year_end_exceptions_can_be_replayed_after_pending_commitment_resolves()
 def test_scheduled_calendar_close_catches_up_and_is_idempotent():
     from modules.leave.tasks import process_year_end_boundary
 
-    LeavePolicy.objects.get_or_create(key="current")
+    LeavePolicy.objects.update_or_create(key="current", defaults={"year_end_month": 1, "year_end_day": 1})
     LeaveEmployeeProfile.objects.create(employee_id="boundary-worker")
     assert process_year_end_boundary("2027-01-02")["processed"] is True
     assert LeaveYearRun.objects.filter(year=2026, exceptions=[]).exists()
@@ -515,6 +535,103 @@ def test_scheduled_calendar_close_catches_up_and_is_idempotent():
     assert LeaveYearAccount.objects.filter(
         employee_id="boundary-worker", leave_type="CL", year=2027, available_balance=8
     ).exists()
+
+
+def test_substitute_acceptance_creates_actionable_next_task_and_routes_all_categories(stub_iam):
+    LeavePolicy.objects.get_or_create(key="current")
+    LeaveEmployeeProfile.objects.update_or_create(
+        employee_id="1001",
+        defaults={"unit_head_id": "2001", "sanctioning_authority_id": "3001", "eligible_substitute_ids": ["4001"]},
+    )
+    LeaveEmployeeProfile.objects.update_or_create(employee_id="4001", defaults={})
+    for category, balance in (("CL", 8), ("EL", 30)):
+        LeaveYearAccount.objects.update_or_create(
+            employee_id="1001", leave_type=category, year=2026,
+            defaults={"opening_balance": balance, "available_balance": balance},
+        )
+    for category, decision in (("CL", "approve"), ("EL", "recommend")):
+        api = client(stub_iam, 1001, ("leave_cell.requests.create",))
+        request_day = "2026-11-02" if category == "CL" else "2026-11-03"
+        created = api.post("/api/v1/leave/requests/", {
+            "leave_type": category, "start_date": request_day, "end_date": request_day,
+            "reason": "routing regression", "substitute_id": "4001",
+        }, format="json")
+        assert created.status_code == 201, created.content
+        request_id = created.json()["id"]
+        sub = client(stub_iam, 4001, ("leave_cell.tasks.act", "leave_cell.tasks.view"))
+        assert sub.get("/api/v1/leave/inbox/").status_code == 200
+        assert sub.post(f"/api/v1/leave/requests/{request_id}/act/", {"action": "accept"}, format="json").status_code == 200
+        unit = client(stub_iam, 2001, ("leave_cell.tasks.act", "leave_cell.tasks.view"))
+        inbox = unit.get("/api/v1/leave/inbox/")
+        assert inbox.status_code == 200
+        assert any(row["request_id"] == request_id and row["role"] == "unit_head" for row in inbox.json())
+        sub = client(stub_iam, 4001, ("leave_cell.tasks.act", "leave_cell.tasks.view"))
+        assert sub.post(f"/api/v1/leave/requests/{request_id}/act/", {"action": decision}, format="json").status_code == 403
+        unit = client(stub_iam, 2001, ("leave_cell.tasks.act", "leave_cell.tasks.view"))
+        acted = unit.post(f"/api/v1/leave/requests/{request_id}/act/", {"action": decision}, format="json")
+        assert acted.status_code == 200, acted.content
+        if category == "EL":
+            authority = client(stub_iam, 3001, ("leave_cell.tasks.act", "leave_cell.tasks.view"))
+            assert any(row["request_id"] == request_id for row in authority.get("/api/v1/leave/inbox/").json())
+            approved = authority.post(
+                f"/api/v1/leave/requests/{request_id}/act/", {"action": "approve"}, format="json"
+            )
+            assert approved.status_code == 200, approved.content
+            account = LeaveYearAccount.objects.get(employee_id="1001", leave_type="EL", year=2026)
+            assert account.available_balance == 29
+
+    # A replacement nominee must follow the same next-stage routing.
+    LeaveEmployeeProfile.objects.update_or_create(
+        employee_id="1001", defaults={"unit_head_id": "2001", "sanctioning_authority_id": "3001", "eligible_substitute_ids": ["4001", "4002"]}
+    )
+    LeaveEmployeeProfile.objects.update_or_create(employee_id="4002", defaults={})
+    applicant = client(stub_iam, 1001, ("leave_cell.requests.create", "leave_cell.tasks.act"))
+    created = applicant.post("/api/v1/leave/requests/", {
+        "leave_type": "CL", "start_date": "2026-11-04", "end_date": "2026-11-04",
+        "reason": "replacement routing", "substitute_id": "4001",
+    }, format="json")
+    assert created.status_code == 201, created.content
+    request_id = created.json()["id"]
+    first = client(stub_iam, 4001, ("leave_cell.tasks.act",))
+    assert first.post(f"/api/v1/leave/requests/{request_id}/act/", {"action": "decline"}, format="json").status_code == 200
+    applicant = client(stub_iam, 1001, ("leave_cell.requests.create", "leave_cell.tasks.act"))
+    assert applicant.post(f"/api/v1/leave/requests/{request_id}/act/", {
+        "action": "replace_substitute", "substitute_id": "4002",
+    }, format="json").status_code == 200
+    replacement = client(stub_iam, 4002, ("leave_cell.tasks.act",))
+    assert replacement.post(f"/api/v1/leave/requests/{request_id}/act/", {"action": "accept"}, format="json").status_code == 200
+    unit = client(stub_iam, 2001, ("leave_cell.tasks.view",))
+    assert any(row["request_id"] == request_id for row in unit.get("/api/v1/leave/inbox/").json())
+
+
+def test_configured_boundary_triggers_calendar_account_close_and_fails_closed():
+    from datetime import datetime
+    from unittest.mock import patch
+
+    from django.utils import timezone
+
+    from modules.leave.tasks import process_year_end_boundary
+
+    LeaveEmployeeProfile.objects.create(employee_id="march-boundary")
+    policy, _ = LeavePolicy.objects.get_or_create(key="current")
+    policy.year_end_month = None
+    policy.year_end_day = None
+    policy.save()
+    assert process_year_end_boundary("2027-03-31")["reason"] == "year-end boundary is not configured"
+    policy.year_end_month, policy.year_end_day = 3, 31
+    policy.save()
+    assert process_year_end_boundary("2027-03-30")["year"] == 2025
+    assert process_year_end_boundary("2027-03-31")["year"] == 2026
+    assert LeaveYearAccount.objects.filter(employee_id="march-boundary", year=2027).exists()
+
+    policy.year_end_month, policy.year_end_day = 4, 1
+    policy.save()
+    # 2028-03-31 20:00 UTC is already April 1 in the configured local zone.
+    with timezone.override("Asia/Kolkata"), patch(
+        "django.utils.timezone.now",
+        return_value=datetime(2028, 3, 31, 20, 0, tzinfo=UTC),
+    ):
+        assert process_year_end_boundary()["year"] == 2027
 
 
 def test_sla_threshold_processing_escalates_once_and_only_open_tasks():

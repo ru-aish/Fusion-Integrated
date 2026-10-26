@@ -3,7 +3,7 @@ import json
 from datetime import date, timedelta
 from decimal import Decimal
 
-from django.db import connection, transaction
+from django.db import connection, models, transaction
 from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
@@ -35,6 +35,7 @@ PENDING_STATES = {
     "cancellation_unit_head",
     "cancellation_establishment",
     "cancellation_authority",
+    "resumption_review_pending",
 }
 
 
@@ -128,6 +129,20 @@ def _year_slices(category, start, end, half_day="none"):
     return result
 
 
+def _reject_closed_years(years):
+    closed_years = LeaveYearRun.objects.filter(exceptions=[]).values_list("year", flat=True)
+    closed = sorted(set(years) & set(closed_years))
+    if closed:
+        raise ValidationError(
+            {
+                "detail": (
+                    f"Leave accounts for closed calendar year(s) {closed} cannot be changed; "
+                    "contact the leave administrator for an audited reconciliation."
+                )
+            }
+        )
+
+
 @transaction.atomic
 def submit_request(data, employee_id, actor_id):
     # Lock a shared employee row, so overlap checks serialize across categories.
@@ -147,6 +162,7 @@ def submit_request(data, employee_id, actor_id):
     if policy is None:
         raise ValidationError({"detail": "Current ELM policy is not configured."})
     category, start, end = data["leave_type"], data["start_date"], data["end_date"]
+    _reject_closed_years(range(start.year, end.year + 1))
     evidence = str(data.get("medical_evidence_reference", "")).strip()
     if category == "COL" and policy.col_medical_evidence_required and not evidence:
         raise ValidationError(
@@ -386,6 +402,7 @@ def create_offline_record(data, actor_id):
         raise ValidationError({"employee_id": "Employee has no authoritative HR profile."})
     if data["start_date"] > data["end_date"]:
         raise ValidationError({"start_date": "Offline leave dates must be ordered."})
+    _reject_closed_years(range(data["start_date"].year, data["end_date"].year + 1))
     allowed_authorities = {
         profile.unit_head_id,
         profile.sanctioning_authority_id,
@@ -543,7 +560,6 @@ def run_year_end(year, actor_id="system"):
     existing_run = LeaveYearRun.objects.filter(year=year).first()
     if existing_run and not existing_run.exceptions:
         return existing_run
-    exceptions = []
     employee_ids = list(
         LeaveYearAccount.objects.filter(year=year)
         .order_by("employee_id")
@@ -560,15 +576,26 @@ def run_year_end(year, actor_id="system"):
         .filter(year=year)
         .order_by("employee_id", "leave_type")
     )
+    # Preflight every balance before mutating any account. A deferred close
+    # must be safe to retry without duplicating another employee's carry or
+    # annual entitlement while a pending cancellation/resumption is resolved.
+    exceptions = []
     for account in accounts:
-        profile = LeaveEmployeeProfile.objects.filter(employee_id=account.employee_id).first()
         pending = LeaveRequest.objects.filter(
             employee_id=account.employee_id,
             leave_type=account.leave_type,
-            start_date__lte=date(year, 12, 31),
-            end_date__gte=date(year, 1, 1),
-            request_kind__in={"new", "extension"},
             workflow_state__in=PENDING_STATES,
+        ).filter(
+            models.Q(
+                request_kind__in={"new", "extension"},
+                start_date__lte=date(year, 12, 31),
+                end_date__gte=date(year, 1, 1),
+            )
+            | models.Q(
+                request_kind__in={"cancellation", "resumption"},
+                parent_request__start_date__lte=date(year, 12, 31),
+                parent_request__end_date__gte=date(year, 1, 1),
+            )
         )
         if pending.exists():
             exceptions.append(
@@ -578,7 +605,16 @@ def run_year_end(year, actor_id="system"):
                     "reason": "pending requests remain at year end",
                 }
             )
-            continue
+    if exceptions:
+        if existing_run:
+            existing_run.exceptions = exceptions
+            existing_run.actor_id = str(actor_id)
+            existing_run.save(update_fields=["exceptions", "actor_id"])
+            return existing_run
+        return LeaveYearRun.objects.create(year=year, actor_id=str(actor_id), exceptions=exceptions)
+
+    for account in accounts:
+        profile = LeaveEmployeeProfile.objects.filter(employee_id=account.employee_id).first()
         unused = max(Decimal("0"), account.available_balance)
         if account.leave_type in {"CL", "RH", "SCL", "VL"}:
             if account.leave_type == "VL" and profile and profile.is_faculty:
@@ -800,6 +836,9 @@ def submit_cancellation(original_id, employee_id, actor_id):
     )
     if profile is None:
         raise ValidationError("Employee routing profile is unavailable.")
+    _reject_closed_years(
+        _year_slices(original.leave_type, original.start_date, original.end_date, original.half_day)
+    )
     state = "cancellation_unit_head"
     obj = LeaveRequest.objects.create(
         employee_id=original.employee_id,
@@ -866,6 +905,9 @@ def submit_resumption(original_id, employee_id, actor_id, actual_return_date):
     )
     if profile is None:
         raise ValidationError("Employee routing profile is unavailable.")
+    _reject_closed_years(
+        _year_slices(original.leave_type, original.start_date, original.end_date, original.half_day)
+    )
     state = "resumption_review_pending"
     obj = LeaveRequest.objects.create(
         employee_id=original.employee_id,
@@ -942,6 +984,10 @@ def act_on_request(obj_id, actor_id, action, note="", substitute_id=""):
             if unavailable:
                 raise ValidationError("Substitute now has conflicting pending or approved leave.")
             after = "awaiting_unit_head" if not profile.is_director else "awaiting_director"
+            if after == "awaiting_unit_head":
+                _task(obj, profile.unit_head_id, "unit_head")
+            else:
+                _task(obj, profile.sanctioning_authority_id, "authority")
     elif action == "replace_substitute":
         if actor_id != int(obj.employee_id) or before != "applicant_action_required":
             raise PermissionDenied("Only the applicant can nominate a replacement at this stage.")
@@ -1108,6 +1154,7 @@ def act_on_request(obj_id, actor_id, action, note="", substitute_id=""):
             old_slices = _year_slices(
                 original.leave_type, original.start_date, original.end_date, original.half_day
             )
+            _reject_closed_years(old_slices)
             if after == "resumption_early_synchronized" or after == "resumption_late_synchronized":
                 original.end_date = obj.actual_return_date - timedelta(days=1)
             if after != "resumption_no_adjustment":

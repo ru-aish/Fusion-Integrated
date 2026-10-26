@@ -153,11 +153,10 @@ Final focused verification for this pass:
 
 ## External prerequisites and limits
 
-- The specification says year-end runs at the configured boundary but does not supply
-  an institution-specific boundary date. The scheduled task currently uses the
-  calendar-year boundary (January 1), consistent with calendar-year annual entitlements;
-  its daily idempotent check catches up if that date was missed. HR must confirm the
-  institution boundary before production scheduling.
+- The institution-specific year-end boundary is now a required policy configuration
+  (month and day together). It intentionally has no assumed default; scheduling fails
+  closed until authorized HR configures it. Annual account years and entitlement caps,
+  including SCL's calendar-year cap, remain January–December.
 - Profiles and calendars are maintained through authorized ELM configuration screens;
   an upstream HR or Academic Calendar feed is not connected in this pass. Production
   use requires approved profile/hierarchy data and published calendars.
@@ -168,3 +167,44 @@ Final focused verification for this pass:
 - The selected local `gpt-oss-20b` runtime remained unavailable. No model weights were
   downloaded and no interaction with that model is claimed; this work used the assigned
   GPT-6 Luna agent.
+
+## Correctness follow-up for PR78
+
+The independent QA findings against `58a4c43887aa4b4301497fbe0405dd4a74551e9b`
+were addressed in this follow-up:
+
+- **Year close and pending balance changes:** close now locks employee profiles,
+  checks all affected calendar account years (including cancellation/resumption child
+  requests by their current parent dates), and preflights every account before changing
+  any balance. If any relevant workflow is pending, the run records exceptions and
+  changes no accounts. A retry after resolution processes all accounts once. New leave,
+  offline sanctions, cancellations, resumptions, and direct admin adjustments targeting
+  a successfully closed calendar year return an explicit audited-reconciliation error.
+  The same employee-profile lock serializes workflow submission/adjustment against close.
+- **Substitute routing:** acceptance completes the substitute task and creates the next
+  authority task in the same database transaction as the state transition and history.
+  Unit Head tasks are now visible/actionable for CL/RH final decisions and higher leave
+  recommendations; director requests route to the configured authority. Task notification
+  outbox errors roll back the transition.
+- **Boundary meaning and scheduling:** policy stores validated `year_end_month` and
+  `year_end_day`; the configuration API, HR UI, migration, and OpenAPI document these
+  fields. February 29 is rejected because the trigger must occur annually. At the
+  configured local date, the scheduled task closes the immediately preceding calendar
+  account year; before that year's boundary it targets the prior calendar year. Missed
+  executions within that boundary period coalesce to that target year and run replay is
+  idempotent. The task processes one target year per invocation; if multiple boundary
+  periods were missed, older years are not auto-backfilled. HR must review older account
+  years and use the explicit year-close control to process them in order.
+- **Lint:** added a pinned ESLint 10/TypeScript/React Hooks toolchain and flat config.
+  `npm run lint` passes with zero errors. It reports 40 warnings in existing code: React
+  Fast Refresh export patterns, two synchronous state updates in effects, and existing
+  `any` annotations in the configuration page. These are warnings so the initial scoped
+  lint baseline does not trigger unrelated cleanup.
+
+Final follow-up verification on PostgreSQL 16.15:
+
+- `/work/bin/workspace-run check -- /bin/bash /work/artifacts/fusion-elm-6b/with-db-env.sh .venv/bin/pytest -q --no-header modules/leave/tests fusion_auth/tests --maxfail=1` — **63 passed**.
+- `/work/bin/workspace-run check -- npm test -- --maxWorkers=1` — **38 passed** in 6 files; `npm run typecheck`, `npm run build`, and `npm run lint` passed. Vite still reports the 502.53 kB main chunk warning.
+- Django `check`, `makemigrations --check --dry-run`, focused Ruff, permission manifest, route/navigation, module-FK, plural-contract, and generated OpenAPI comparison all passed. The new migration `0013_leavepolicy_year_end_day_leavepolicy_year_end_month` applied to the task PostgreSQL database.
+- Permanent regression tests include the cancellation-after-close and early-resumption repros, no partial account processing during a deferred close, replay/idempotency, rejection of closed-year submissions/offline records/resumptions/cancellations/admin adjustments, timezone boundary behavior, missing configuration, substitute denial, Unit Head inbox actions for CL and higher leave, authority approval, and replacement-substitute routing.
+- T3 preview smoke used the task's synthetic local IAM only (not institute SSO): owner submission, substitute acceptance, Unit Head approval, owner balance/history, and JSON export. Request 3 finished approved; both tasks completed; 2026 CL showed 7 available and reconciled. Synthetic records and the task-owned dev unit were removed/stopped afterward; the PostgreSQL container remains available for review.
