@@ -9,6 +9,9 @@ type LeaveRequest = {
   start_date: string;
   end_date: string;
   reason: string;
+  half_day: "none" | "first" | "second";
+  station_leave: boolean;
+  station_leave_details: string;
   status: string;
 };
 type Page<T> = { results: T[] };
@@ -19,6 +22,9 @@ export default function RequestsPage() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [reason, setReason] = useState("");
+  const [halfDay, setHalfDay] = useState<LeaveRequest["half_day"]>("none");
+  const [stationLeave, setStationLeave] = useState(false);
+  const [stationLeaveDetails, setStationLeaveDetails] = useState("");
   const requests = useQuery({
     queryKey: ["leave-cell", "requests"],
     queryFn: async () => (await http.get<Page<LeaveRequest>>("/leave/requests/")).data.results,
@@ -28,19 +34,26 @@ export default function RequestsPage() {
       (await http.post<LeaveRequest>("/leave/requests/", data)).data,
     onSuccess: () => {
       setReason("");
+      setHalfDay("none");
+      setStationLeave(false);
+      setStationLeaveDetails("");
       client.invalidateQueries({ queryKey: ["leave-cell", "requests"] });
     },
   });
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    create.mutate({ leave_type: leaveType, start_date: startDate, end_date: endDate, reason });
+    create.mutate({ leave_type: leaveType, start_date: startDate, end_date: endDate,
+      reason, half_day: halfDay, station_leave: stationLeave,
+      station_leave_details: stationLeaveDetails });
   }
 
   return <main>
     <h1>Leave Requests</h1>
     <form onSubmit={submit}>
-      <label>Leave type <select value={leaveType} onChange={(e) => setLeaveType(e.target.value)}>
+      <label>Leave type <select value={leaveType} onChange={(e) => {
+        setLeaveType(e.target.value); if (e.target.value !== "CL") setHalfDay("none");
+      }}>
         <option value="CL">Casual Leave</option><option value="RH">Restricted Holiday</option>
         <option value="SCL">Special Casual Leave</option><option value="EL">Earned Leave</option>
         <option value="COL">Compensatory Off</option><option value="VL">Vacation Leave</option>
@@ -50,6 +63,16 @@ export default function RequestsPage() {
       <label>To <input required type="date" value={endDate}
         onChange={(e) => setEndDate(e.target.value)} /></label>{" "}
       <label>Reason <input value={reason} onChange={(e) => setReason(e.target.value)} /></label>{" "}
+      {leaveType === "CL" && <label>Day portion <select value={halfDay}
+        onChange={(e) => setHalfDay(e.target.value as LeaveRequest["half_day"])}>
+        <option value="none">Full day(s)</option><option value="first">First half</option>
+        <option value="second">Second half</option>
+      </select></label>}{" "}
+      <label><input type="checkbox" checked={stationLeave}
+        onChange={(e) => setStationLeave(e.target.checked)} /> Station Leave</label>{" "}
+      {stationLeave && <label>Station Leave details <input required maxLength={500}
+        value={stationLeaveDetails} onChange={(e) => setStationLeaveDetails(e.target.value)} />
+      </label>}{" "}
       <button type="submit" disabled={create.isPending}>Submit request</button>
     </form>
     {create.isError && <p role="alert">{errorMessage(create.error)}</p>}
