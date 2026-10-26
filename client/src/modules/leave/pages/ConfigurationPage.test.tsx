@@ -13,12 +13,20 @@ describe("leave configuration", () => {
       if (url === "/leave/calendar/") return { data: { results: [] } };
       if (url === "/leave/offline-records/" || url === "/leave/sla/") return { data: [] };
       if (url === "/leave/year-end/") return { data: { runs: [], accounts: [] } };
-      return { data: [{ cl_annual: 8, rh_annual: 2 }] };
+      if (url === "/leave/policy/") return { data: [{ cl_annual: 8, rh_annual: 2, year_end_month: 3, year_end_day: 31 }] };
+      return { data: [] };
     });
     vi.spyOn(http, "post").mockResolvedValue({ data: {} });
     const query = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={query}>{(<ConfigurationPage />) as ReactNode}</QueryClientProvider>);
     expect(await screen.findByText(/1001: Unit Head 2001/)).toBeInTheDocument();
+    expect(screen.getByText(/Entitlement accounts stay calendar-year based/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("year end month"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("year end day"), { target: { value: "15" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save policy" }));
+    await waitFor(() => expect(http.post).toHaveBeenCalledWith("/leave/policy/", expect.objectContaining({
+      year_end_month: 4, year_end_day: 15,
+    })));
     fireEvent.change(screen.getAllByLabelText("Employee ID")[0]!, { target: { value: "1002" } });
     fireEvent.change(screen.getByLabelText("Unit Head ID"), { target: { value: "2002" } });
     fireEvent.change(screen.getByLabelText("Final authority ID"), { target: { value: "3002" } });

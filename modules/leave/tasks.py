@@ -16,9 +16,20 @@ def process_year_end_boundary(today=None):
     today = today or timezone.localdate()
     if isinstance(today, str):
         today = date.fromisoformat(today)
-    from .models import LeaveYearRun
+    from .models import LeavePolicy, LeaveYearRun
 
-    closing_year = today.year - 1
+    policy = LeavePolicy.objects.filter(key="current").first()
+    if not policy or not policy.year_end_month or not policy.year_end_day:
+        return {"processed": False, "reason": "year-end boundary is not configured"}
+    try:
+        boundary = date(today.year, policy.year_end_month, policy.year_end_day)
+    except (TypeError, ValueError):
+        return {"processed": False, "reason": "configured year-end boundary is invalid"}
+    # Account and entitlement years remain Jan-Dec. The configured date is
+    # only the trigger: close the latest calendar year whose boundary passed.
+    closing_year = today.year - 1 if today >= boundary else today.year - 2
+    if closing_year < 2000:
+        return {"processed": False, "reason": "no complete calendar year is eligible"}
     existing = LeaveYearRun.objects.filter(year=closing_year).first()
     if existing and not existing.exceptions:
         return {"processed": False, "reason": "calendar year already closed"}

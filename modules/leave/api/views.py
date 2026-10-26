@@ -521,6 +521,10 @@ class LeaveYearEndViewSet(viewsets.ViewSet):
                 raise ValidationError(
                     {"employee_id": "No authoritative HR profile exists for this employee."}
                 )
+            if LeaveYearRun.objects.filter(year=year, exceptions=[]).exists():
+                raise ValidationError(
+                    {"year": "Closed calendar years require a separately audited reconciliation."}
+                )
             acc = (
                 LeaveYearAccount.objects.select_for_update()
                 .filter(employee_id=d["employee_id"], leave_type=d["leave_type"], year=year)
