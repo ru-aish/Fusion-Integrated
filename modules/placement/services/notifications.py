@@ -29,6 +29,7 @@ TOPICS = {
     "announcement.published", "recruiter.invited", "company.approved",
     "company.rejected", "conduct.sanctioned", "registration.confirmed",
     "record.not_joining",
+    "leave.task.assigned", "leave.task.reminder", "leave.task.escalated",
 }
 
 

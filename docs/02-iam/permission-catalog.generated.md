@@ -13,6 +13,20 @@ For the intended taxonomy of modules not yet built, see
 |---|---|---|
 | `directory.user.search` | Search the institute directory | `Dean Academic`, `acadadmin`, `placement_chairman`, `placement_coordinator`, `placement_officer` |
 
+## `leave_cell`
+
+| Code | What it allows | Held by |
+|---|---|---|
+| `leave_cell.balances.view` | View leave balances | `employee`, `hr` |
+| `leave_cell.requests.view` | View own leave requests | `employee`, `hr` |
+| `leave_cell.requests.create` | Create leave requests | `employee`, `hr` |
+| `leave_cell.tasks.view` | View assigned leave tasks | `establishment`, `hr`, `sanctioning_authority`, `substitute`, `unit_head` |
+| `leave_cell.tasks.act` | Act on assigned leave tasks | `establishment`, `hr`, `sanctioning_authority`, `substitute`, `unit_head` |
+| `leave_cell.configuration.manage` | Manage authoritative leave configuration | `hr` |
+| `leave_cell.offline.sync` | Synchronize authorized offline leave records | `hr` |
+| `leave_cell.accounts.manage` | Issue and reconcile annual leave accounts | `hr` |
+| `leave_cell.sla.manage` | Configure leave workflow SLAs | `hr` |
+
 ## `placement_cell`
 
 | Code | What it allows | Held by |
