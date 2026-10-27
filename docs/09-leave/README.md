@@ -49,3 +49,8 @@ The Phase 2 branch is based directly on that PR head; remote history was not cha
 
 See [Phase 2 evidence](phase2-evidence.md) for commands, results, environment
 limitations, and the local-model availability record.
+
+## Development records
+
+- [Phase-1 broad implementation prompt](phase1-prompt-bundles.md) — one reconstructed prompt associated with the recorded Phase-1 result.
+- [Phase-2 implementation, review and verification log](phase2-work-log.md) — instruction summaries, actual commits, findings and checks.
