@@ -52,5 +52,5 @@ limitations, and the local-model availability record.
 
 ## Development records
 
-- [Phase-1 change-bundled prompt sequence](phase1-prompt-bundles.md) — reconstructed bundles within the single Phase-1 commit.
+- [Phase-1 broad implementation prompt](phase1-prompt-bundles.md) — one reconstructed prompt associated with the recorded Phase-1 result.
 - [Phase-2 implementation, review and verification log](phase2-work-log.md) — instruction summaries, actual commits, findings and checks.

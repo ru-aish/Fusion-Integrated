@@ -17,8 +17,8 @@ unavailable. See [the evidence and limitations](phase2-evidence.md).
 Phase 1 supplied a pending-request submission/list/balance pilot. Its commit is
 preserved as `phase1-elm-pr78` and in a verified separate Git bundle. The complete
 ELM specification package was retained outside the application tree. The
-[Phase-1 prompt bundles](phase1-prompt-bundles.md) describe logical groups within
-its single commit; they are not additional historical commits.
+[Phase-1 broad prompt](phase1-prompt-bundles.md) is a reconstruction associated
+with its single result commit; it is not a verified execution transcript.
 
 ## 1. Validate the inherited pilot against the specification
 
